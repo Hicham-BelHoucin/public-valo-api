@@ -1,0 +1,23 @@
+# Stage 1 — build
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+# copy package.json & install deps
+COPY package.json ./
+RUN npm install
+
+# copy source & compile
+COPY . .
+RUN npm run build
+
+# Stage 2 — run
+FROM node:20-alpine AS runner
+WORKDIR /app
+
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/.env ./
+
+EXPOSE 9999
+CMD ["node", "dist/main.js"]

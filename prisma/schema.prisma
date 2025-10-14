@@ -1,0 +1,476 @@
+// ---------------------------------------------
+// Prisma setup
+// ---------------------------------------------
+generator client {
+    provider = "prisma-client-js"
+}
+
+datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------
+// Enums
+// ---------------------------------------------
+enum UserRole {
+    SUPER_ADMIN
+    NORMAL_USER
+    DIRECTOR_GENERAL
+    DIRECTION_SYSTEMES_INFORMATION
+    FRONT_OFFICE
+    MIDDLE_OFFICE
+    BACK_OFFICE
+    ANALYSE_RECHERCHE
+    RISK_MANAGEMENT
+    DESK_COMMERCIAL
+    CONTROLE_INTERNE
+}
+
+enum UserStatus {
+    ACTIVE
+    INACTIVE
+    PENDING
+    LOCKED
+}
+
+// Keep this small/stable; extend as needed
+enum DocumentKind {
+    KIID
+    PROSPECTUS
+    FACTSHEET
+    OTHER
+}
+
+// ---------------------------------------------
+// Users
+// ---------------------------------------------
+model User {
+    id        String @id @default(uuid())
+    email     String @unique // case-insensitive unique
+    firstName String
+    lastName  String
+    password  String // store a hash, never plaintext
+
+    role   UserRole   @default(NORMAL_USER)
+    status UserStatus @default(PENDING)
+
+    // Optional: Link to department / hierarchy
+    department      String? @db.VarChar(100)
+    position        String? @db.VarChar(100)
+    supervisor      String? @db.VarChar(100) // e.g. manager name or id
+    phoneNumber     String? @db.VarChar(20)
+    profileImageUrl String? @db.Text
+
+    // Account / login tracking
+    lastLogin                DateTime?
+    verificationToken        String?   @db.VarChar(36)
+    verificationTokenExpiry  DateTime?
+    emailVerified            Boolean   @default(false)
+    resetPasswordToken       String?   @db.VarChar(36)
+    resetPasswordTokenExpiry DateTime?
+    passwordChangedAt        DateTime?
+    previousPasswords        String?   @db.Text // store hashes if used
+    failedLoginAttempts      Int       @default(0)
+    lockoutUntil             DateTime?
+
+    // Sessions / Tokens
+    refreshToken       String?
+    refreshTokenExpiry DateTime?
+    sessionId          String?   @db.VarChar(36)
+    lastIp             String?   @db.VarChar(45)
+    userAgent          String?   @db.VarChar(255)
+
+    // Metadata and custom data
+    metadata  Json?     @default("{}")
+    bio       String[]
+    notes     String?   @db.Text
+    expiresAt DateTime?
+
+    // 2FA fields
+    isTwoFactorEnabled   Boolean @default(false)
+    twoFactorSecret      String? @db.VarChar(255)
+    twoFactorBackupCodes String? @db.Text // JSON array of backup codes
+
+    // Relationships
+    assignedFunds FundUserAssignment[]
+
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+}
+
+// ---------------------------------------------
+// Categories
+// ---------------------------------------------
+model Category {
+    id            String  @id @default(uuid())
+    code          String  @unique
+    nameEn        String
+    nameFr        String
+    descriptionEn String? @db.Text
+    descriptionFr String? @db.Text
+    isActive      Boolean @default(true)
+
+    funds Fund[]
+
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+}
+
+// ---------------------------------------------
+// Funds (PUBLISHED)
+// ---------------------------------------------
+model Fund {
+    id                String  @id @default(uuid())
+    fundCode          String  @unique @db.VarChar(100)
+    currency          String  @default("MAD") @db.VarChar(10)
+    hasPreviewChanges Boolean @default(false)
+
+    // Snapshot (optional if you always read from FundValuation)
+    navValue Decimal?  @db.Decimal(12, 6)
+    navDate  DateTime?
+
+    // Performance snapshots (bps). Allow negatives for performance.
+    dailyChangeBps     Int?
+    yearPerformanceBps Int?
+
+    maroclearCode String? @db.VarChar(50)
+    isinCode      String? @unique @db.VarChar(12) // ISIN code (12 characters standard)
+
+    // Financial information
+    netAssets Decimal? @db.Decimal(15, 2) // Net assets value
+
+    // Relations
+    categoryId String?
+    category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+    creationDate DateTime?
+    initialNav   Decimal?  @db.Decimal(12, 6)
+
+    // Fees (bps), suggested DB CHECK 0..10000 in a SQL migration
+    maxSubscriptionFeeBps Int?
+    maxRedemptionFeeBps   Int?
+    maxManagementFeeBps   Int?
+
+    benchmarkIndex   String? @db.VarChar(255)
+    sensitivityRange String? @db.VarChar(255)
+    depositary       String? @db.VarChar(255) // Depositary/custodian name
+
+    // Audit
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    // Relations
+    translations        FundTranslation[]
+    valuations          FundValuation[]
+    documents           FundDocument[]
+    distributors        FundDistributor[]
+    fundUserAssignments FundUserAssignment[] @relation("FundUserAssignments")
+    fundDrafts          FundDraft[]          @relation("FundDrafts")
+
+    // Previews live in separate tables:
+    // - FundPreview (1:1)
+    // - FundTranslationPreview (1:n per locale)
+    fundPreview            FundPreview?
+    fundTranslationPreview FundTranslationPreview[]
+
+    @@index([navDate])
+    @@index([categoryId])
+    @@index([maroclearCode])
+    @@index([isinCode])
+    @@map("funds")
+}
+
+// ---------------------------------------------
+// Fund PREVIEW (proposed changes from script; one row only when pending)
+// ---------------------------------------------
+model FundPreview {
+    id     String @id @default(uuid())
+    fundId String @unique
+    fund   Fund   @relation(fields: [fundId], references: [id], onDelete: Cascade)
+
+    // Only fields the script is allowed to propose:
+    benchmarkIndex        String? @db.VarChar(255)
+    sensitivityRange      String? @db.VarChar(255)
+    maxSubscriptionFeeBps Int?
+    maxRedemptionFeeBps   Int?
+    maxManagementFeeBps   Int?
+
+    // Optional snapshot proposals (if your script proposes them)
+    navValue Decimal?  @db.Decimal(12, 6)
+    navDate  DateTime?
+
+    // Audit / workflow
+    proposedBy    String?  @db.VarChar(36) // "system" or user id
+    proposedAt    DateTime @default(now())
+    lastUpdatedAt DateTime @updatedAt
+    note          String?  @db.VarChar(255)
+}
+
+// ---------------------------------------------
+// Fund translations (PUBLISHED)
+// ---------------------------------------------
+model FundTranslation {
+    id     String @id @default(uuid())
+    fundId String
+    fund   Fund   @relation(fields: [fundId], references: [id], onDelete: Cascade)
+
+    // ISO language tag, e.g. "fr", "en", "ar-MA"
+    locale String @db.VarChar(10)
+
+    // Live, published fields
+    name                String? @db.VarChar(255)
+    legalForm           String? @db.VarChar(50)
+    resultsAllocation   String? @db.VarChar(100)
+    subscribers         String? @db.VarChar(100)
+    // Investment information
+    investmentObjective String? @db.Text // objectif_de_placement
+
+    // Fund composition and frequency
+    fundComposition String? @db.Text // composition_du_fonds
+    navFrequency    String? @db.VarChar(100)
+
+    subscriberInfo      String? @db.VarChar(100)
+    minimumSubscription String? @db.VarChar(255)
+    orderSubmissionTime String? @db.VarChar(255)
+    investmentHorizon   String? @db.VarChar(255)
+    strategy            String? @db.Text
+
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    @@unique([fundId, locale])
+    @@index([locale])
+}
+
+// ---------------------------------------------
+// Fund translation PREVIEW (per fund+locale)
+// ---------------------------------------------
+model FundTranslationPreview {
+    id     String @id @default(uuid())
+    fundId String
+    fund   Fund   @relation(fields: [fundId], references: [id], onDelete: Cascade)
+
+    locale String @db.VarChar(10)
+
+    name              String? @db.VarChar(255)
+    legalForm         String? @db.VarChar(50)
+    resultsAllocation String? @db.VarChar(100)
+    subscribers       String? @db.VarChar(100)
+
+    // Investment information
+    investmentObjective String? @db.Text // objectif_de_placement
+
+    // Fund composition and frequency
+    fundComposition String? @db.Text // composition_du_fonds
+    navFrequency    String? @db.VarChar(100)
+
+    subscriberInfo      String? @db.VarChar(100)
+    minimumSubscription String? @db.VarChar(255)
+    orderSubmissionTime String? @db.VarChar(255)
+
+    investmentHorizon String? @db.VarChar(255)
+    strategy          String? @db.Text
+
+    proposedBy    String?  @db.VarChar(36)
+    proposedAt    DateTime @default(now())
+    lastUpdatedAt DateTime @updatedAt
+    note          String?  @db.VarChar(255)
+
+    @@unique([fundId, locale])
+    @@index([locale])
+}
+
+// ---------------------------------------------
+// Valuations (normalized time series)
+// ---------------------------------------------
+model FundValuation {
+    id     String @id @default(uuid())
+    fundId String
+    fund   Fund   @relation(fields: [fundId], references: [id], onDelete: Cascade)
+
+    date DateTime // store UTC midnight for the market date (document this convention)
+    nav  Decimal  @db.Decimal(12, 6)
+
+    // Optional cached returns for that date (bps)
+    dailyChangeBps    Int?
+    ytdPerformanceBps Int?
+
+    @@unique([fundId, date])
+    @@index([fundId, date])
+    @@index([date])
+}
+
+// ---------------------------------------------
+// Documents
+// ---------------------------------------------
+model FundDocument {
+    id     String @id @default(uuid())
+    fundId String
+    fund   Fund   @relation(fields: [fundId], references: [id], onDelete: Cascade)
+
+    kind        DocumentKind
+    url         String       @db.VarChar(2048)
+    locale      String?      @db.VarChar(10)
+    publishedAt DateTime?
+
+    @@index([fundId, kind, locale, publishedAt])
+    @@index([kind, locale])
+}
+
+// ---------------------------------------------
+// Distributors
+// ---------------------------------------------
+model FundDistributor {
+    id     String @id @default(uuid())
+    fundId String
+    fund   Fund   @relation(fields: [fundId], references: [id], onDelete: Cascade)
+
+    name String  @db.VarChar(255)
+    code String? @db.VarChar(50)
+
+    @@index([fundId])
+    @@index([name])
+}
+
+// ---------------------------------------------
+// Drafts (human-authored, optional but kept)
+// ---------------------------------------------
+model FundDraft {
+    id     String @id @default(uuid())
+    fundId String @unique
+    fund   Fund   @relation(fields: [fundId], references: [id], onDelete: Cascade, name: "FundDrafts")
+
+    // Editable subset (expand as your editors need)
+    currency         String  @db.VarChar(10)
+    benchmarkIndex   String? @db.VarChar(255)
+    sensitivityRange String? @db.VarChar(255)
+
+    // Fees in bps
+    maxSubscriptionFeeBps Int?
+    maxRedemptionFeeBps   Int?
+    maxManagementFeeBps   Int?
+
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+}
+
+// ---------------------------------------------
+// User <-> Fund assignments
+// ---------------------------------------------
+model FundUserAssignment {
+    id       String  @id @default(uuid())
+    fundId   String
+    userId   String
+    role     String  @default("MANAGER") // MANAGER, VIEWER
+    isActive Boolean @default(true)
+
+    fund Fund @relation(fields: [fundId], references: [id], onDelete: Cascade, name: "FundUserAssignments")
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@unique([fundId, userId])
+    @@index([fundId])
+    @@index([userId])
+    @@map("fund_user_assignments")
+}
+
+// ---------------------------------------------
+// Numbers (Key-Value Configuration)
+// ---------------------------------------------
+model Numbers {
+    id          String   @id @default(uuid())
+    key         String   @unique @db.VarChar(50)
+    value       String   @db.VarChar(100)
+    description String?  @db.VarChar(200)
+    order       Int      @default(0)
+    isActive    Boolean  @default(true)
+    createdAt   DateTime @default(now())
+    updatedAt   DateTime @updatedAt
+
+    @@index([key])
+    @@index([isActive])
+    @@index([order])
+    @@map("numbers")
+}
+
+// ---------------------------------------------
+// Client Status Enum
+// ---------------------------------------------
+enum ClientStatus {
+    ACTIVE
+    INACTIVE
+    PENDING
+    SUSPENDED
+}
+
+// ---------------------------------------------
+// Clients
+// ---------------------------------------------
+model Client {
+    id               String       @id @default(uuid())
+    name             String       @db.VarChar(100)
+    email            String       @unique @db.VarChar(100)
+    phone            String?      @db.VarChar(20)
+    status           ClientStatus @default(PENDING)
+    joinDate         DateTime     @default(now())
+    lastActivity     DateTime?
+    totalInvestments Decimal      @default(0) @db.Decimal(15, 2)
+
+    // Activity tracking
+    activities ClientActivity[]
+
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    @@index([email])
+    @@index([status])
+    @@index([joinDate])
+    @@index([lastActivity])
+    @@map("clients")
+}
+
+// ---------------------------------------------
+// Client Activity Tracking
+// ---------------------------------------------
+model ClientActivity {
+    id       String @id @default(uuid())
+    clientId String
+    client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+    activityType String  @db.VarChar(50) // LOGIN, INVESTMENT, PROFILE_UPDATE, etc.
+    description  String? @db.VarChar(255)
+    ipAddress    String? @db.VarChar(45)
+    userAgent    String? @db.VarChar(255)
+    metadata     Json?   @default("{}")
+
+    createdAt DateTime @default(now())
+
+    @@index([clientId])
+    @@index([activityType])
+    @@index([createdAt])
+    @@map("client_activities")
+}
+
+// ---------------------------------------------
+// Audit Logs
+// ---------------------------------------------
+model AuditLog {
+    id           String   @id @default(uuid())
+    action       String   @db.VarChar(100)
+    userId       String?  @db.Uuid
+    targetUserId String?  @db.Uuid
+    resource     String   @db.VarChar(50)
+    resourceId   String?  @db.VarChar(100)
+    ipAddress    String?  @db.VarChar(45)
+    userAgent    String?  @db.VarChar(255)
+    status       String   @db.VarChar(10)
+    details      String?  @db.Text
+    metadata     Json?
+    timestamp    DateTime @default(now())
+
+    @@index([action])
+    @@index([userId])
+    @@index([resource])
+    @@index([timestamp])
+    @@map("audit_logs")
+}

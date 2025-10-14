@@ -1,0 +1,21 @@
+# api/docker-compose.yml
+services:
+  api:
+    build: .
+    container_name: public-fund-management-api
+    restart: always
+    ports:
+      - '9999:9999'
+    develop:
+      watch:
+        - action: sync
+          path: .
+          target: /app
+    networks:
+      - api-internal
+    env_file:
+      - .env
+
+networks:
+  api-internal:
+    driver: bridge
