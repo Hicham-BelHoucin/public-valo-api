@@ -147,11 +147,6 @@ model Fund {
     creationDate DateTime?
     initialNav   Decimal?  @db.Decimal(12, 6)
 
-    // Fees (bps), suggested DB CHECK 0..10000 in a SQL migration
-    maxSubscriptionFeeBps Int?
-    maxRedemptionFeeBps   Int?
-    maxManagementFeeBps   Int?
-
     benchmarkIndex   String? @db.VarChar(255)
     sensitivityRange String? @db.VarChar(255)
     depositary       String? @db.VarChar(255) // Depositary/custodian name
@@ -190,11 +185,8 @@ model FundPreview {
     fund   Fund   @relation(fields: [fundId], references: [id], onDelete: Cascade)
 
     // Only fields the script is allowed to propose:
-    benchmarkIndex        String? @db.VarChar(255)
-    sensitivityRange      String? @db.VarChar(255)
-    maxSubscriptionFeeBps Int?
-    maxRedemptionFeeBps   Int?
-    maxManagementFeeBps   Int?
+    benchmarkIndex   String? @db.VarChar(255)
+    sensitivityRange String? @db.VarChar(255)
 
     // Optional snapshot proposals (if your script proposes them)
     navValue Decimal?  @db.Decimal(12, 6)
@@ -289,12 +281,15 @@ model FundValuation {
     fundId String
     fund   Fund   @relation(fields: [fundId], references: [id], onDelete: Cascade)
 
-    date DateTime // store UTC midnight for the market date (document this convention)
-    nav  Decimal  @db.Decimal(12, 6)
+    date                 DateTime // store UTC midnight for the market date (document this convention)
+    nav                  Decimal  @db.Decimal(30, 6)
+    an                   Decimal  @db.Decimal(30, 6)
+    benchmarkPerformance Decimal  @db.Decimal(30, 6)
 
     // Optional cached returns for that date (bps)
-    dailyChangeBps    Int?
-    ytdPerformanceBps Int?
+    dailyChangeBps          Int?
+    ytdPerformanceBps       Int?
+    benchmarkPerformanceBps Int?
 
     @@unique([fundId, date])
     @@index([fundId, date])

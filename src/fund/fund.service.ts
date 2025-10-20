@@ -304,6 +304,7 @@ export class FundService {
     const performance = allValuations.map((valuation) => ({
       date: valuation.date.toISOString().split('T')[0],
       nav: valuation.nav.toNumber(),
+      an: valuation.an.toNumber(),
       dailyChangeBps: valuation.dailyChangeBps ?? undefined,
       ytdPerformanceBps: valuation.ytdPerformanceBps ?? undefined,
     }));
