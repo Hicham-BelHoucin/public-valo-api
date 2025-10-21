@@ -5,6 +5,7 @@ import { FundModule } from './fund/fund.module';
 import { CoreModule } from './core/core.module';
 import { NumbersModule } from './numbers/numbers.module';
 import { TeamModule } from './team/team.module';
+import { ActualityModule } from './actuality/actuality.module';
 
 @Module({
   imports: [
@@ -23,6 +24,8 @@ import { TeamModule } from './team/team.module';
     NumbersModule,
     // Team module (Notre équipe)
     TeamModule,
+    // Actuality module (Actualités)
+    ActualityModule,
   ],
   controllers: [],
   providers: [],

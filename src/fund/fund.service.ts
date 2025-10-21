@@ -305,8 +305,6 @@ export class FundService {
       date: valuation.date.toISOString().split('T')[0],
       nav: valuation.nav.toNumber(),
       an: valuation.an.toNumber(),
-      dailyChangeBps: valuation.dailyChangeBps ?? undefined,
-      ytdPerformanceBps: valuation.ytdPerformanceBps ?? undefined,
     }));
 
     // Calculate various performance metrics

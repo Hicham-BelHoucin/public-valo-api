@@ -130,10 +130,6 @@ model Fund {
     navValue Decimal?  @db.Decimal(12, 6)
     navDate  DateTime?
 
-    // Performance snapshots (bps). Allow negatives for performance.
-    dailyChangeBps     Int?
-    yearPerformanceBps Int?
-
     maroclearCode String? @db.VarChar(50)
     isinCode      String? @unique @db.VarChar(12) // ISIN code (12 characters standard)
 
@@ -286,11 +282,6 @@ model FundValuation {
     an                   Decimal  @db.Decimal(30, 6)
     benchmarkPerformance Decimal  @db.Decimal(30, 6)
 
-    // Optional cached returns for that date (bps)
-    dailyChangeBps          Int?
-    ytdPerformanceBps       Int?
-    benchmarkPerformanceBps Int?
-
     @@unique([fundId, date])
     @@index([fundId, date])
     @@index([date])
@@ -340,11 +331,6 @@ model FundDraft {
     currency         String  @db.VarChar(10)
     benchmarkIndex   String? @db.VarChar(255)
     sensitivityRange String? @db.VarChar(255)
-
-    // Fees in bps
-    maxSubscriptionFeeBps Int?
-    maxRedemptionFeeBps   Int?
-    maxManagementFeeBps   Int?
 
     createdAt DateTime @default(now())
     updatedAt DateTime @updatedAt
@@ -468,4 +454,19 @@ model AuditLog {
     @@index([resource])
     @@index([timestamp])
     @@map("audit_logs")
+}
+
+// ---------------------------------------------
+// Actuality 
+// ---------------------------------------------
+model Actuality {
+    id          String   @id @default(uuid())
+    title       String   @db.VarChar(255)
+    content     String   @db.Text
+    imageUrl    String?  @db.VarChar(255)
+    source      String?  @db.VarChar(255)
+    link        String?  @db.VarChar(255)
+    publishedAt DateTime @default(now())
+    createdAt   DateTime @default(now())
+    updatedAt   DateTime @updatedAt
 }
