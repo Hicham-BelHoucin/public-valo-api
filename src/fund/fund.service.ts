@@ -15,6 +15,7 @@ export class FundService {
     const limit = filter?.limit ? parseInt(filter.limit, 10) : 20;
     const locale = filter?.locale || 'fr';
 
+    // Fetch all funds (we need all to sort by YTD across the entire set, then paginate)
     const [funds, total] = await this.prisma.$transaction([
       this.prisma.fund.findMany({
         include: {
@@ -42,15 +43,24 @@ export class FundService {
           fundPreview: true,
         },
         orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit,
+        // Note: do not skip/take here because we need to sort by computed YTD across all funds,
+        // then apply pagination after sorting.
       }),
       this.prisma.fund.count(),
     ]);
 
-    // Transform each fund to match the same format as findOne
-    const transformedFunds = funds.map((fund) => {
+    // Compute YTD (and small performance summary) for each fund in parallel
+    const metricsForFunds = await Promise.all(
+      funds.map((f) => this.getFundPerformanceMetrics(f.id)),
+    );
+
+    console.log(metricsForFunds);
+
+    // Transform each fund to match the same format as findOne and attach ytdPerformance
+    const transformedFunds = funds.map((fund, idx) => {
       const t = fund.translations[0] || {};
+      const metrics = metricsForFunds[idx] || {};
+      const ytd = metrics.ytdPerformance;
 
       return {
         id: fund.id,
@@ -58,6 +68,7 @@ export class FundService {
         objectifDePlacement: t.investmentObjective,
         compositionDuFonds: t.fundComposition,
         name: t.name,
+        _ytdPerformance: typeof ytd === 'number' ? ytd : undefined, // internal field for sorting
 
         caracteristiquesGenerales: {
           codeISIN: fund.isinCode || 'N/A',
@@ -82,7 +93,22 @@ export class FundService {
       };
     });
 
-    return { data: transformedFunds, total, page, limit };
+    // Sort by YTD descending. Funds with undefined YTD go to the end.
+    transformedFunds.sort((a, b) => {
+      const ay = a._ytdPerformance;
+      const by = b._ytdPerformance;
+      if (ay === undefined && by === undefined) return 0;
+      if (ay === undefined) return 1; // a after b
+      if (by === undefined) return -1; // a before b
+      return by - ay; // descending
+    });
+
+    // Apply pagination on the sorted list
+    const start = (page - 1) * limit;
+    const end = start + limit;
+    const paginated = transformedFunds;
+
+    return { data: paginated, total, page, limit };
   }
 
   // Get a fund by ID with locale and preview support
