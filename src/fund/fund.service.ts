@@ -20,7 +20,7 @@ export class FundService {
       this.prisma.fund.findMany({
         include: {
           category: {
-            select: { nameFr: true, nameEn: true },
+            select: { nameFr: true, nameEn: true, code: true },
           },
           distributors: true,
           fundUserAssignments: {
@@ -54,13 +54,105 @@ export class FundService {
       funds.map((f) => this.getFundPerformanceMetrics(f.id)),
     );
 
-    console.log(metricsForFunds);
+    // Helper to compute a category priority (lower = higher precedence)
+    const getCategoryPriority = (code?: string, nameFr?: string) => {
+      const normalize = (s: string) =>
+        s
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/\p{Diacritic}/gu, '')
+          .replace(/[^a-z0-9]+/g, '-');
+
+      const source = (code || nameFr || '').toString();
+      const n = normalize(source);
+
+      // Order desired by user: monétaire, obligataire CT, Obligataire MLT, Diversifié, Actions
+      if (n.includes('monet') || n.includes('monetaire')) return 0;
+      if (n.includes('court') && n.includes('oblig')) return 1; // obligataire court terme
+      if (
+        (n.includes('moyen') || n.includes('long') || n.includes('mlt')) &&
+        n.includes('oblig')
+      )
+        return 2; // obligataire moyen/long
+      if (n.includes('divers')) return 3;
+      if (n.includes('action') || n.includes('actions')) return 4;
+
+      // fallback: put unknown categories after known ones
+      return 999;
+    };
+
+    // Helper to compute liquidity profile based on category
+    const getLiquidityProfile = (code?: string, nameFr?: string) => {
+      const normalize = (s: string) =>
+        s
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/\p{Diacritic}/gu, '')
+          .replace(/[^a-z0-9]+/g, '-');
+
+      const source = (code || nameFr || '').toString();
+      const n = normalize(source);
+
+      // monétaire & obligataire CT => très élevée
+      if (n.includes('monet') || n.includes('monetaire')) return 'très élevée';
+      if (n.includes('court') && n.includes('oblig')) return 'très élevée';
+
+      // obligataire MLT, diversifié, actions => élevée
+      if (
+        (n.includes('moyen') || n.includes('long') || n.includes('mlt')) &&
+        n.includes('oblig')
+      )
+        return 'élevée';
+      if (n.includes('divers')) return 'élevée';
+      if (n.includes('action') || n.includes('actions')) return 'élevée';
+
+      // fallback
+      return 'inconnue';
+    };
+
+    const getRiskProfile = (code?: string, nameFr?: string) => {
+      const normalize = (s: string) =>
+        s
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/\p{Diacritic}/gu, '')
+          .replace(/[^a-z0-9]+/g, '-');
+      const source = (code || nameFr || '').toString();
+      const n = normalize(source);
+      // monétaire => faible
+      if (n.includes('monet') || n.includes('monetaire')) return 'faible';
+      // obligataire CT => faible à modéré
+      if (n.includes('court') && n.includes('oblig')) return 'faible à modéré';
+      // obligataire MLT => modéré
+      if (
+        (n.includes('moyen') || n.includes('long') || n.includes('mlt')) &&
+        n.includes('oblig')
+      )
+        return 'modéré';
+      // diversifié => modéré à élevé
+      if (n.includes('divers')) return 'modéré à élevé';
+      // actions => élevé
+      if (n.includes('action') || n.includes('actions')) return 'élevé';
+
+      // fallback
+      return 'inconnu';
+    };
 
     // Transform each fund to match the same format as findOne and attach ytdPerformance
     const transformedFunds = funds.map((fund, idx) => {
       const t = fund.translations[0] || {};
       const metrics = metricsForFunds[idx] || {};
       const ytd = metrics.ytdPerformance;
+      const categoryCode = fund.category?.code || fund.category?.nameFr;
+      const categoryPriority = getCategoryPriority(
+        categoryCode,
+        fund.category?.nameFr,
+      );
+      const liquidityProfile = getLiquidityProfile(
+        categoryCode,
+        fund.category?.nameFr,
+      );
+      const riskProfile = getRiskProfile(categoryCode, fund.category?.nameFr);
 
       return {
         id: fund.id,
@@ -69,7 +161,9 @@ export class FundService {
         compositionDuFonds: t.fundComposition,
         name: t.name,
         _ytdPerformance: typeof ytd === 'number' ? ytd : undefined, // internal field for sorting
-
+        _categoryPriority: categoryPriority,
+        liquidityProfile: liquidityProfile,
+        riskProfile: riskProfile,
         caracteristiquesGenerales: {
           codeISIN: fund.isinCode || 'N/A',
           formeJuridique: t.legalForm || 'N/A',
@@ -93,8 +187,12 @@ export class FundService {
       };
     });
 
-    // Sort by YTD descending. Funds with undefined YTD go to the end.
+    // Sort first by category priority (ascending), then by YTD descending (undefined last)
     transformedFunds.sort((a, b) => {
+      const ap = a._categoryPriority ?? 999;
+      const bp = b._categoryPriority ?? 999;
+      if (ap !== bp) return ap - bp;
+
       const ay = a._ytdPerformance;
       const by = b._ytdPerformance;
       if (ay === undefined && by === undefined) return 0;
@@ -106,7 +204,8 @@ export class FundService {
     // Apply pagination on the sorted list
     const start = (page - 1) * limit;
     const end = start + limit;
-    const paginated = transformedFunds;
+    // Keep internal fields (_ytdPerformance, _categoryPriority) as requested
+    const paginated = transformedFunds.slice(start, end);
 
     return { data: paginated, total, page, limit };
   }
