@@ -36,6 +36,9 @@ export class UserFilterDto {
   @IsString()
   @IsOptional()
   limit?: string;
+
+  @IsOptional()
+  sortBy?: string;
 }
 
 // DTO for user response

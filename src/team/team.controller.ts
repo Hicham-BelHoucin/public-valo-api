@@ -8,7 +8,7 @@ import { Public } from '../core/decorators/public.decorator';
 export class TeamController {
   constructor(private readonly teamService: TeamService) {}
 
-  @Get()
+  @Get('')
   findAll(@Query() filter: UserFilterDto) {
     return this.teamService.findAll(filter);
   }

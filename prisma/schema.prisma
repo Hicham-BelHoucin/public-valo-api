@@ -61,6 +61,7 @@ model User {
     supervisor      String? @db.VarChar(100) // e.g. manager name or id
     phoneNumber     String? @db.VarChar(20)
     profileImageUrl String? @db.Text
+    experienceYears Int? // years of experience
 
     // Account / login tracking
     lastLogin                DateTime?

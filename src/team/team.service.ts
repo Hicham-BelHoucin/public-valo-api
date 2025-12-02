@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UserFilterDto } from './dto/team.dto';
 import { UserRole } from '@prisma/client';
@@ -9,6 +13,10 @@ export class TeamService {
 
   // Get all users (Notre équipe) with pagination and filtering
   async findAll(filter?: UserFilterDto) {
+    const sortByValues = ['department', 'experience'];
+    if (filter?.sortBy && !sortByValues.includes(filter.sortBy)) {
+      throw new BadRequestException(`Invalid sortBy value: ${filter.sortBy}`);
+    }
     const page = filter?.page ? parseInt(filter.page, 10) : 1;
     const limit = filter?.limit ? parseInt(filter.limit, 10) : 20;
 
@@ -55,15 +63,38 @@ export class TeamService {
           phoneNumber: true,
           profileImageUrl: true,
           lastLogin: true,
+          experienceYears: true,
           createdAt: true,
           updatedAt: true,
         },
-        orderBy: { createdAt: 'desc' },
+        ...(filter?.sortBy === 'experience' && {
+          orderBy: { experienceYears: 'desc' },
+        }),
         skip: (page - 1) * limit,
         take: limit,
       }),
       this.prisma.user.count({ where }),
     ]);
+
+    const Departmentsort = [
+      'DIRECTOR_GENERAL',
+      'FRONT_OFFICE',
+      'DESK_COMMERCIAL',
+      'CONTROLE_INTERNE',
+      'MIDDLE_OFFICE',
+      'BACK_OFFICE',
+      'ANALYSE_RECHERCHE',
+      'RISK_MANAGEMENT',
+      'DIRECTION_SYSTEMES_INFORMATION',
+    ];
+
+    if (filter?.sortBy === 'department') {
+      users.sort((a, b) => {
+        const deptAIndex = Departmentsort.indexOf(a.role);
+        const deptBIndex = Departmentsort.indexOf(b.role);
+        return deptAIndex - deptBIndex;
+      });
+    }
 
     return { data: users, total, page, limit };
   }
